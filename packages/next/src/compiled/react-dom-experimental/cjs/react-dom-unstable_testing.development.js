@@ -1062,6 +1062,7 @@ var SyncHydrationLane =
 var SyncLane =
 /*                        */
 2;
+var SyncLaneIndex = 1;
 var InputContinuousHydrationLane =
 /*    */
 4;
@@ -1367,12 +1368,17 @@ function getNextLanes(root, wipLanes) {
     }
   }
 
-  if ((nextLanes & InputContinuousLane) !== NoLanes) {
+  return nextLanes;
+}
+function getEntangledLanes(root, renderLanes) {
+  var entangledLanes = renderLanes;
+
+  if ((entangledLanes & InputContinuousLane) !== NoLanes) {
     // When updates are sync by default, we entangle continuous priority updates
     // and default updates, so they render in the same batch. The only reason
     // they use separate lanes is because continuous updates should interrupt
     // transitions, but default updates should not.
-    nextLanes |= pendingLanes & DefaultLane;
+    entangledLanes |= entangledLanes & DefaultLane;
   } // Check for entangled lanes and add them to the batch.
   //
   // A lane is said to be entangled with another when it's not allowed to render
@@ -1397,21 +1403,21 @@ function getNextLanes(root, wipLanes) {
   // time we apply the entanglement.
 
 
-  var entangledLanes = root.entangledLanes;
+  var allEntangledLanes = root.entangledLanes;
 
-  if (entangledLanes !== NoLanes) {
+  if (allEntangledLanes !== NoLanes) {
     var entanglements = root.entanglements;
-    var lanes = nextLanes & entangledLanes;
+    var lanes = entangledLanes & allEntangledLanes;
 
     while (lanes > 0) {
       var index = pickArbitraryLaneIndex(lanes);
       var lane = 1 << index;
-      nextLanes |= entanglements[index];
+      entangledLanes |= entanglements[index];
       lanes &= ~lane;
     }
   }
 
-  return nextLanes;
+  return entangledLanes;
 }
 
 function computeExpirationTime(lane, currentTime) {
@@ -1489,6 +1495,7 @@ function markStarvedLanesAsExpired(root, currentTime) {
   var expirationTimes = root.expirationTimes; // Iterate through the pending lanes and check if we've reached their
   // expiration time. If so, we'll assume the update is being starved and mark
   // it as expired to force it to finish.
+  // TODO: We should be able to replace this with upgradePendingLanesToSync
   //
   // We exclude retry lanes because those must always be time sliced, in order
   // to unwrap uncached promises.
@@ -1754,6 +1761,29 @@ function markRootEntangled(root, entangledLanes) {
     lanes &= ~lane;
   }
 }
+function upgradePendingLaneToSync(root, lane) {
+  // Since we're upgrading the priority of the given lane, there is now pending
+  // sync work.
+  root.pendingLanes |= SyncLane; // Entangle the sync lane with the lane we're upgrading. This means SyncLane
+  // will not be allowed to finish without also finishing the given lane.
+
+  root.entangledLanes |= SyncLane;
+  root.entanglements[SyncLaneIndex] |= lane;
+}
+function upgradePendingLanesToSync(root, lanesToUpgrade) {
+  // Same as upgradePendingLaneToSync but accepts multiple lanes, so it's a
+  // bit slower.
+  root.pendingLanes |= SyncLane;
+  root.entangledLanes |= SyncLane;
+  var lanes = lanesToUpgrade;
+
+  while (lanes) {
+    var index = pickArbitraryLaneIndex(lanes);
+    var lane = 1 << index;
+    root.entanglements[SyncLaneIndex] |= lane;
+    lanes &= ~lane;
+  }
+}
 function markHiddenUpdate(root, update, lane) {
   var index = laneToIndex(lane);
   var hiddenUpdates = root.hiddenUpdates;
@@ -1995,7 +2025,7 @@ function testStringCoercion(value) {
 function checkAttributeStringCoercion(value, attributeName) {
   {
     if (willCoercionThrow(value)) {
-      error('The provided `%s` attribute is an unsupported type %s.' + ' This value must be coerced to a string before before using it here.', attributeName, typeName(value));
+      error('The provided `%s` attribute is an unsupported type %s.' + ' This value must be coerced to a string before using it here.', attributeName, typeName(value));
 
       return testStringCoercion(value); // throw (to help callers find troubleshooting comments)
     }
@@ -2004,7 +2034,7 @@ function checkAttributeStringCoercion(value, attributeName) {
 function checkKeyStringCoercion(value) {
   {
     if (willCoercionThrow(value)) {
-      error('The provided key is an unsupported type %s.' + ' This value must be coerced to a string before before using it here.', typeName(value));
+      error('The provided key is an unsupported type %s.' + ' This value must be coerced to a string before using it here.', typeName(value));
 
       return testStringCoercion(value); // throw (to help callers find troubleshooting comments)
     }
@@ -2013,7 +2043,7 @@ function checkKeyStringCoercion(value) {
 function checkPropStringCoercion(value, propName) {
   {
     if (willCoercionThrow(value)) {
-      error('The provided `%s` prop is an unsupported type %s.' + ' This value must be coerced to a string before before using it here.', propName, typeName(value));
+      error('The provided `%s` prop is an unsupported type %s.' + ' This value must be coerced to a string before using it here.', propName, typeName(value));
 
       return testStringCoercion(value); // throw (to help callers find troubleshooting comments)
     }
@@ -2022,7 +2052,7 @@ function checkPropStringCoercion(value, propName) {
 function checkCSSPropertyStringCoercion(value, propName) {
   {
     if (willCoercionThrow(value)) {
-      error('The provided `%s` CSS property is an unsupported type %s.' + ' This value must be coerced to a string before before using it here.', propName, typeName(value));
+      error('The provided `%s` CSS property is an unsupported type %s.' + ' This value must be coerced to a string before using it here.', propName, typeName(value));
 
       return testStringCoercion(value); // throw (to help callers find troubleshooting comments)
     }
@@ -2031,7 +2061,7 @@ function checkCSSPropertyStringCoercion(value, propName) {
 function checkHtmlStringCoercion(value) {
   {
     if (willCoercionThrow(value)) {
-      error('The provided HTML markup uses a value of unsupported type %s.' + ' This value must be coerced to a string before before using it here.', typeName(value));
+      error('The provided HTML markup uses a value of unsupported type %s.' + ' This value must be coerced to a string before using it here.', typeName(value));
 
       return testStringCoercion(value); // throw (to help callers find troubleshooting comments)
     }
@@ -2040,7 +2070,7 @@ function checkHtmlStringCoercion(value) {
 function checkFormFieldValueStringCoercion(value) {
   {
     if (willCoercionThrow(value)) {
-      error('Form field values (value, checked, defaultValue, or defaultChecked props)' + ' must be strings, not %s.' + ' This value must be coerced to a string before before using it here.', typeName(value));
+      error('Form field values (value, checked, defaultValue, or defaultChecked props)' + ' must be strings, not %s.' + ' This value must be coerced to a string before using it here.', typeName(value));
 
       return testStringCoercion(value); // throw (to help callers find troubleshooting comments)
     }
@@ -9987,29 +10017,29 @@ function resetChildFibers(workInProgress, lanes) {
 // InvisibleParentContext that is currently managed by SuspenseContext.
 
 var currentTreeHiddenStackCursor = createCursor(null);
-var prevRenderLanesStackCursor = createCursor(NoLanes);
+var prevEntangledRenderLanesCursor = createCursor(NoLanes);
 function pushHiddenContext(fiber, context) {
-  var prevRenderLanes = getRenderLanes();
-  push(prevRenderLanesStackCursor, prevRenderLanes, fiber);
+  var prevEntangledRenderLanes = getEntangledRenderLanes();
+  push(prevEntangledRenderLanesCursor, prevEntangledRenderLanes, fiber);
   push(currentTreeHiddenStackCursor, context, fiber); // When rendering a subtree that's currently hidden, we must include all
   // lanes that would have rendered if the hidden subtree hadn't been deferred.
   // That is, in order to reveal content from hidden -> visible, we must commit
   // all the updates that we skipped when we originally hid the tree.
 
-  setRenderLanes(mergeLanes(prevRenderLanes, context.baseLanes));
+  setEntangledRenderLanes(mergeLanes(prevEntangledRenderLanes, context.baseLanes));
 }
 function reuseHiddenContextOnStack(fiber) {
   // This subtree is not currently hidden, so we don't need to add any lanes
   // to the render lanes. But we still need to push something to avoid a
   // context mismatch. Reuse the existing context on the stack.
-  push(prevRenderLanesStackCursor, getRenderLanes(), fiber);
+  push(prevEntangledRenderLanesCursor, getEntangledRenderLanes(), fiber);
   push(currentTreeHiddenStackCursor, currentTreeHiddenStackCursor.current, fiber);
 }
 function popHiddenContext(fiber) {
   // Restore the previous render lanes from the stack
-  setRenderLanes(prevRenderLanesStackCursor.current);
+  setEntangledRenderLanes(prevEntangledRenderLanesCursor.current);
   pop(currentTreeHiddenStackCursor, fiber);
-  pop(prevRenderLanesStackCursor, fiber);
+  pop(prevEntangledRenderLanesCursor, fiber);
 }
 function isCurrentTreeHidden() {
   return currentTreeHiddenStackCursor.current !== null;
@@ -10371,7 +10401,10 @@ function processRootScheduleInMicrotask() {
     var next = root.next;
 
     if (currentEventTransitionLane !== NoLane && shouldAttemptEagerTransition()) {
-      markRootEntangled(root, mergeLanes(currentEventTransitionLane, SyncLane));
+      // A transition was scheduled during an event, but we're going to try to
+      // render it synchronously anyway. We do this during a popstate event to
+      // preserve the scroll position of the previous page.
+      upgradePendingLaneToSync(root, currentEventTransitionLane);
     }
 
     var nextLanes = scheduleTaskForRootDuringMicrotask(root, currentTime);
@@ -10777,7 +10810,7 @@ var didWarnAboutAsyncClientComponent;
 // These are set right before calling the component.
 
 
-var renderLanes$1 = NoLanes; // The work-in-progress fiber. I've named it differently to distinguish it from
+var renderLanes = NoLanes; // The work-in-progress fiber. I've named it differently to distinguish it from
 // the work-in-progress hook.
 
 var currentlyRenderingFiber$1 = null; // Hooks are stored as a linked list on the fiber's memoizedState field. The
@@ -10971,7 +11004,7 @@ function areHookInputsEqual(nextDeps, prevDeps) {
 }
 
 function renderWithHooks(current, workInProgress, Component, props, secondArg, nextRenderLanes) {
-  renderLanes$1 = nextRenderLanes;
+  renderLanes = nextRenderLanes;
   currentlyRenderingFiber$1 = workInProgress;
 
   {
@@ -11077,7 +11110,7 @@ function finishRenderingHooks(current, workInProgress, Component) {
   // hookTypesDev could catch more cases (e.g. context) but only in DEV bundles.
 
   var didRenderTooFewHooks = currentHook !== null && currentHook.next !== null;
-  renderLanes$1 = NoLanes;
+  renderLanes = NoLanes;
   currentlyRenderingFiber$1 = null;
   currentHook = null;
   workInProgressHook = null;
@@ -11275,7 +11308,7 @@ function resetHooksOnUnwind(workInProgress) {
     didScheduleRenderPhaseUpdate = false;
   }
 
-  renderLanes$1 = NoLanes;
+  renderLanes = NoLanes;
   currentlyRenderingFiber$1 = null;
   currentHook = null;
   workInProgressHook = null;
@@ -11588,7 +11621,7 @@ function updateReducerImpl(hook, current, reducer) {
       // it's not a "base" update and we should disregard the extra base lanes
       // that were added to renderLanes when we entered the Offscreen tree.
 
-      var shouldSkipUpdate = isHiddenUpdate ? !isSubsetOfLanes(getWorkInProgressRootRenderLanes(), updateLane) : !isSubsetOfLanes(renderLanes$1, updateLane);
+      var shouldSkipUpdate = isHiddenUpdate ? !isSubsetOfLanes(getWorkInProgressRootRenderLanes(), updateLane) : !isSubsetOfLanes(renderLanes, updateLane);
 
       if (shouldSkipUpdate) {
         // Priority is insufficient. Skip this update. If this is the first
@@ -11643,7 +11676,7 @@ function updateReducerImpl(hook, current, reducer) {
           // sufficient, don't apply the update. Otherwise, apply the update,
           // but leave it in the queue so it can be either reverted or
           // rebased in a subsequent render.
-          if (isSubsetOfLanes(renderLanes$1, revertLane)) {
+          if (isSubsetOfLanes(renderLanes, revertLane)) {
             // The transition that this optimistic update is associated with
             // has finished. Pretend the update doesn't exist by skipping
             // over it.
@@ -11829,7 +11862,9 @@ function mountSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) {
       throw new Error('Expected a work-in-progress root. This is a bug in React. Please file an issue.');
     }
 
-    if (!includesBlockingLane(root, renderLanes$1)) {
+    var rootRenderLanes = getWorkInProgressRootRenderLanes();
+
+    if (!includesBlockingLane(root, rootRenderLanes)) {
       pushStoreConsistencyCheck(fiber, getSnapshot, nextSnapshot);
     }
   } // Read the current snapshot from the store on every render. This breaks the
@@ -11915,7 +11950,7 @@ function updateSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) {
       throw new Error('Expected a work-in-progress root. This is a bug in React. Please file an issue.');
     }
 
-    if (!isHydrating && !includesBlockingLane(root, renderLanes$1)) {
+    if (!isHydrating && !includesBlockingLane(root, renderLanes)) {
       pushStoreConsistencyCheck(fiber, getSnapshot, nextSnapshot);
     }
   }
@@ -12656,7 +12691,7 @@ function mountDeferredValueImpl(hook, value, initialValue) {
 function updateDeferredValueImpl(hook, prevValue, value, initialValue) {
   // TODO: We should also check if this component is going from
   // hidden -> visible. If so, it should use the initialValue arg.
-  var shouldDeferValue = !includesOnlyNonUrgentLanes(renderLanes$1);
+  var shouldDeferValue = !includesOnlyNonUrgentLanes(renderLanes);
 
   if (shouldDeferValue) {
     // This is an urgent update. If the value has changed, keep using the
@@ -24792,9 +24827,9 @@ var workInProgressRootDidAttachPingListener = false; // A contextual version of 
 // HiddenContext module.
 //
 // Most things in the work loop should deal with workInProgressRootRenderLanes.
-// Most things in begin/complete phases should deal with renderLanes.
+// Most things in begin/complete phases should deal with entangledRenderLanes.
 
-var renderLanes = NoLanes; // Whether to root completed, errored, suspended, etc.
+var entangledRenderLanes = NoLanes; // Whether to root completed, errored, suspended, etc.
 
 var workInProgressRootExitStatus = RootInProgress; // A fatal error, if one is thrown
 
@@ -25469,7 +25504,7 @@ function performSyncWorkOnRoot(root, lanes) {
 }
 function flushRoot(root, lanes) {
   if (lanes !== NoLanes) {
-    markRootEntangled(root, mergeLanes(lanes, SyncLane));
+    upgradePendingLanesToSync(root, lanes);
     ensureRootIsScheduled(root);
 
     if ((executionContext & (RenderContext | CommitContext)) === NoContext) {
@@ -25552,11 +25587,11 @@ function isInvalidExecutionContextForEventFunction() {
 // place that ever modifies it. Which module it lives in doesn't matter for
 // performance because this function will get inlined regardless
 
-function setRenderLanes(subtreeRenderLanes) {
-  renderLanes = subtreeRenderLanes;
+function setEntangledRenderLanes(newEntangledRenderLanes) {
+  entangledRenderLanes = newEntangledRenderLanes;
 }
-function getRenderLanes() {
-  return renderLanes;
+function getEntangledRenderLanes() {
+  return entangledRenderLanes;
 }
 
 function resetWorkInProgressStack() {
@@ -25607,7 +25642,7 @@ function prepareFreshStack(root, lanes) {
   workInProgressRoot = root;
   var rootWorkInProgress = createWorkInProgress(root.current, null);
   workInProgress = rootWorkInProgress;
-  workInProgressRootRenderLanes = renderLanes = lanes;
+  workInProgressRootRenderLanes = lanes;
   workInProgressSuspendedReason = NotSuspended;
   workInProgressThrownValue = null;
   workInProgressRootDidAttachPingListener = false;
@@ -25617,7 +25652,15 @@ function prepareFreshStack(root, lanes) {
   workInProgressRootInterleavedUpdatedLanes = NoLanes;
   workInProgressRootPingedLanes = NoLanes;
   workInProgressRootConcurrentErrors = null;
-  workInProgressRootRecoverableErrors = null;
+  workInProgressRootRecoverableErrors = null; // Get the lanes that are entangled with whatever we're about to render. We
+  // track these separately so we can distinguish the priority of the render
+  // task from the priority of the lanes it is entangled with. For example, a
+  // transition may not be allowed to finish unless it includes the Sync lane,
+  // which is currently suspended. We should be able to render the Transition
+  // and Sync lane in the same batch, but at Transition priority, because the
+  // Sync lane already suspended.
+
+  entangledRenderLanes = getEntangledLanes(root, lanes);
   finishQueueingConcurrentUpdates();
 
   {
@@ -26279,10 +26322,10 @@ function performUnitOfWork(unitOfWork) {
 
   if ((unitOfWork.mode & ProfileMode) !== NoMode) {
     startProfilerTimer(unitOfWork);
-    next = beginWork(current, unitOfWork, renderLanes);
+    next = beginWork(current, unitOfWork, entangledRenderLanes);
     stopProfilerTimerIfRunningAndRecordDelta(unitOfWork, true);
   } else {
-    next = beginWork(current, unitOfWork, renderLanes);
+    next = beginWork(current, unitOfWork, entangledRenderLanes);
   }
 
   resetCurrentFiber();
@@ -26378,8 +26421,8 @@ function replaySuspendedUnitOfWork(unitOfWork) {
         // reconciled previously. So it's intentional that we don't call
         // resetSuspendedWorkLoopOnUnwind here.
         unwindInterruptedWork(current, unitOfWork);
-        unitOfWork = workInProgress = resetWorkInProgress(unitOfWork, renderLanes);
-        next = beginWork(current, unitOfWork, renderLanes);
+        unitOfWork = workInProgress = resetWorkInProgress(unitOfWork, entangledRenderLanes);
+        next = beginWork(current, unitOfWork, entangledRenderLanes);
         break;
       }
   }
@@ -26482,10 +26525,10 @@ function completeUnitOfWork(unitOfWork) {
     var next = void 0;
 
     if ((completedWork.mode & ProfileMode) === NoMode) {
-      next = completeWork(current, completedWork, renderLanes);
+      next = completeWork(current, completedWork, entangledRenderLanes);
     } else {
       startProfilerTimer(completedWork);
-      next = completeWork(current, completedWork, renderLanes); // Update render duration assuming we didn't error.
+      next = completeWork(current, completedWork, entangledRenderLanes); // Update render duration assuming we didn't error.
 
       stopProfilerTimerIfRunningAndRecordDelta(completedWork, false);
     }
@@ -28725,7 +28768,7 @@ identifierPrefix, onRecoverableError, transitionCallbacks, formState) {
   return root;
 }
 
-var ReactVersion = '18.3.0-experimental-09fbee89d-20231013';
+var ReactVersion = '18.3.0-experimental-67cc9ba87-20231016';
 
 function createPortal$1(children, containerInfo, // TODO: figure out the API for cross-renderer implementation.
 implementation) {
