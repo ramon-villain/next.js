@@ -239,7 +239,7 @@ where
                 _ => false,
             },
             file.name.clone(),
-            opts.pages_dir.clone()
+            opts.pages_dir.clone(),
         ),
         Optional::new(
             page_config::page_config(opts.is_development, opts.is_page_file),

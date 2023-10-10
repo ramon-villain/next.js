@@ -7,7 +7,8 @@ use turbopack_binding::swc::core::{
         ast::{
             ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmtOrExpr, Bool, CallExpr, Callee, Expr,
             ExprOrSpread, Id, Ident, ImportDecl, ImportSpecifier, KeyValueProp, Lit, MemberExpr,
-            MemberProp, Null, ObjectLit, Prop, PropName, PropOrSpread, Str, Tpl,
+            MemberProp, Null, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread, SeqExpr, Str,
+            Tpl,
         },
         atoms::js_word,
         utils::ExprFactory,
@@ -276,8 +277,41 @@ impl Fold for NextDynamicPatcher {
                         }
                     }
 
-                    if has_ssr_false && self.is_server && !self.is_server_components {
-                        expr.args[0] = Lit::Null(Null { span: DUMMY_SP }).as_arg();
+                    if has_ssr_false && self.is_server {
+                        if self.is_server_components {
+                            // Transform 1st argument expr.args[0] to:
+                            // `(/*@ PURE */(() => expr.args[0] )(), null)`
+                            expr.args[0] = (Expr::Paren(ParenExpr {
+                                span: DUMMY_SP,
+                                expr: Box::new(Expr::Seq(SeqExpr {
+                                    span: DUMMY_SP,
+                                    exprs: vec![
+                                        Box::new(Expr::Call(CallExpr {
+                                            span: DUMMY_SP,
+                                            callee: Callee::Expr(Box::new(Expr::Arrow(
+                                                ArrowExpr {
+                                                    span: DUMMY_SP,
+                                                    params: vec![],
+                                                    body: Box::new(BlockStmtOrExpr::Expr(
+                                                        expr.args[0].expr.clone(),
+                                                    )),
+                                                    is_async: false,
+                                                    is_generator: false,
+                                                    return_type: None,
+                                                    type_params: None,
+                                                },
+                                            ))),
+                                            args: vec![],
+                                            type_args: None,
+                                        })),
+                                        Box::new(Expr::Lit(Lit::Null(Null { span: DUMMY_SP }))),
+                                    ],
+                                })),
+                            }))
+                            .as_arg();
+                        } else {
+                            expr.args[0] = Lit::Null(Null { span: DUMMY_SP }).as_arg();
+                        }
                     }
 
                     let second_arg = ExprOrSpread {
