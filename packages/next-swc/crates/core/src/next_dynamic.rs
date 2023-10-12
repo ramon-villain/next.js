@@ -5,10 +5,10 @@ use turbopack_binding::swc::core::{
     common::{errors::HANDLER, FileName, DUMMY_SP},
     ecma::{
         ast::{
-            ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
+            op, ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
             Callee, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportSpecifier,
             KeyValueProp, Lit, MemberExpr, MemberProp, Null, ObjectLit, Prop, PropName,
-            PropOrSpread, ReturnStmt, Stmt, Str, Tpl,
+            PropOrSpread, ReturnStmt, Stmt, Str, Tpl, UnaryExpr, UnaryOp,
         },
         atoms::js_word,
         utils::ExprFactory,
@@ -318,7 +318,9 @@ impl Fold for NextDynamicPatcher {
                                 return_type: None,
                             });
 
-                            expr.args[0] = side_effect_free_loader_arg.as_arg();
+                            expr.args[0] =
+                                wrap_expr_with_client_only_cond(&side_effect_free_loader_arg)
+                                    .as_arg();
                         } else {
                             expr.args[0] = Lit::Null(Null { span: DUMMY_SP }).as_arg();
                         }
@@ -343,6 +345,42 @@ impl Fold for NextDynamicPatcher {
         }
         expr
     }
+}
+
+// Receive an expression and return `typeof window !== 'undefined' &&
+// <expression>`, to make the expression is tree-shakable on server side but
+// still remain in module graph.
+fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
+    let typeof_expr = Expr::Unary(UnaryExpr {
+        span: DUMMY_SP,
+        op: UnaryOp::TypeOf, // 'typeof' operator
+        arg: Box::new(Expr::Ident(Ident {
+            span: DUMMY_SP,
+            sym: "window".into(),
+            optional: false,
+        })),
+    });
+    let undefined_literal = Expr::Lit(Lit::Str(Str {
+        span: DUMMY_SP,
+        value: "undefined".into(),
+        raw: None,
+    }));
+    let inequality_expr = Expr::Bin(BinExpr {
+        span: DUMMY_SP,
+        left: Box::new(typeof_expr),
+        op: BinaryOp::NotEq, // '!=='
+        right: Box::new(undefined_literal),
+    });
+
+    // Create the LogicalExpr 'typeof window !== "undefined" && x'
+    let logical_expr = Expr::Bin(BinExpr {
+        span: DUMMY_SP,
+        op: op!("&&"), // '&&' operator
+        left: Box::new(inequality_expr),
+        right: Box::new(wrapped_expr.clone()),
+    });
+
+    logical_expr
 }
 
 fn rel_filename(base: Option<&Path>, file: &FileName) -> String {

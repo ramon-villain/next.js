@@ -1,6 +1,6 @@
 import dynamic from 'next/dynamic'
 
-const DynamicSSRFalse = dynamic(/*@ PURE */ () => import('./ssr-false'), {
+const DynamicSSRFalse = dynamic(() => import('./ssr-false'), {
   ssr: false,
 })
 
