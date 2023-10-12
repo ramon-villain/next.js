@@ -8,7 +8,7 @@ use turbopack_binding::swc::core::{
             op, ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
             Callee, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportSpecifier,
             KeyValueProp, Lit, MemberExpr, MemberProp, Null, ObjectLit, Prop, PropName,
-            PropOrSpread, ReturnStmt, Stmt, Str, Tpl, UnaryExpr, UnaryOp,
+            PropOrSpread, Stmt, Str, Tpl, UnaryExpr, UnaryOp,
         },
         atoms::js_word,
         utils::ExprFactory,
@@ -279,31 +279,17 @@ impl Fold for NextDynamicPatcher {
 
                     if has_ssr_false && self.is_server {
                         if self.is_server_components {
-                            let noop_react_component = Expr::Arrow(ArrowExpr {
-                                span: DUMMY_SP, // Replace with the appropriate span
-                                params: vec![],
-                                body: Box::new(BlockStmtOrExpr::Expr(Box::new(Expr::Lit(
-                                    Lit::Null(Null { span: DUMMY_SP }),
-                                )))),
-                                is_async: false,
-                                is_generator: false,
-                                type_params: None,
-                                return_type: None,
-                            });
-
                             // Transform 1st argument `expr.args[0]` aka the module loader to:
-                            // `() => {
-                            //    typeof window !== 'window' && expr.args[0]
-                            //    return (async () => null)
-                            // }`
+                            // `typeof window !== 'window' && (() => {
+                            //    expr.args[0]
+                            // })`
                             // For instance:
-                            // dynamic(() => {
-                            // // this will make sure we can traverse the module first but will be
-                            // tree-shake out in server bundle
-                            //   typeof window !== 'window' && () => import('./client-mod')
-                            //   // need to return async component to make react work, otherwise it
-                            // will error   return (async () => null)
-                            // }, { ssr: false })
+                            // dynamic(`typeof window !== 'window' && (() => {
+                            //   /**
+                            //    * this will make sure we can traverse the module first but will be
+                            //    * tree-shake out in server bundle */
+                            //   () => import('./client-mod')
+                            // }), { ssr: false })
                             let side_effect_free_loader_arg = Expr::Arrow(ArrowExpr {
                                 span: DUMMY_SP,
                                 params: vec![],
@@ -315,11 +301,6 @@ impl Fold for NextDynamicPatcher {
                                         Stmt::Expr(ExprStmt {
                                             span: DUMMY_SP,
                                             expr: expr.args[0].expr.clone(),
-                                        }),
-                                        // return null
-                                        Stmt::Return(ReturnStmt {
-                                            span: DUMMY_SP,
-                                            arg: Some(Box::new(noop_react_component)),
                                         }),
                                     ],
                                 })),
