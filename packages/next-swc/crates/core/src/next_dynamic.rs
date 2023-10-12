@@ -291,8 +291,19 @@ impl Fold for NextDynamicPatcher {
                                 return_type: None,
                             });
 
-                            // Transform 1st argument expr.args[0] to:
-                            // `() => { expr.args[0] }`
+                            // Transform 1st argument `expr.args[0]` aka the module loader to:
+                            // `() => {
+                            //    typeof window !== 'window' && expr.args[0]
+                            //    return (async () => null)
+                            // }`
+                            // For instance:
+                            // dynamic(() => {
+                            // // this will make sure we can traverse the module first but will be
+                            // tree-shake out in server bundle
+                            //   typeof window !== 'window' && () => import('./client-mod')
+                            //   // need to return async component to make react work, otherwise it
+                            // will error   return (async () => null)
+                            // }, { ssr: false })
                             let side_effect_free_loader_arg = Expr::Arrow(ArrowExpr {
                                 span: DUMMY_SP,
                                 params: vec![],
