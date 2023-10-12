@@ -5,10 +5,10 @@ use turbopack_binding::swc::core::{
     common::{errors::HANDLER, FileName, DUMMY_SP},
     ecma::{
         ast::{
-            ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmtOrExpr, Bool, CallExpr, Callee, Expr,
-            ExprOrSpread, Id, Ident, ImportDecl, ImportSpecifier, KeyValueProp, Lit, MemberExpr,
-            MemberProp, Null, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread, SeqExpr, Str,
-            Tpl,
+            ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
+            Callee, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportSpecifier,
+            KeyValueProp, Lit, MemberExpr, MemberProp, Null, ObjectLit, Prop, PropName,
+            PropOrSpread, ReturnStmt, Stmt, Str, Tpl,
         },
         atoms::js_word,
         utils::ExprFactory,
@@ -279,36 +279,46 @@ impl Fold for NextDynamicPatcher {
 
                     if has_ssr_false && self.is_server {
                         if self.is_server_components {
+                            let noop_react_component = Expr::Arrow(ArrowExpr {
+                                span: DUMMY_SP, // Replace with the appropriate span
+                                params: vec![],
+                                body: Box::new(BlockStmtOrExpr::Expr(Box::new(Expr::Lit(
+                                    Lit::Null(Null { span: DUMMY_SP }),
+                                )))),
+                                is_async: false,
+                                is_generator: false,
+                                type_params: None,
+                                return_type: None,
+                            });
+
                             // Transform 1st argument expr.args[0] to:
-                            // `(/*@ PURE */(() => expr.args[0] )(), null)`
-                            expr.args[0] = (Expr::Paren(ParenExpr {
+                            // `() => { expr.args[0] }`
+                            let side_effect_free_loader_arg = Expr::Arrow(ArrowExpr {
                                 span: DUMMY_SP,
-                                expr: Box::new(Expr::Seq(SeqExpr {
+                                params: vec![],
+                                body: Box::new(BlockStmtOrExpr::BlockStmt(BlockStmt {
                                     span: DUMMY_SP,
-                                    exprs: vec![
-                                        Box::new(Expr::Call(CallExpr {
+                                    stmts: vec![
+                                        // loader is still inside the module but not executed,
+                                        // then it will be removed by tree-shaking.
+                                        Stmt::Expr(ExprStmt {
                                             span: DUMMY_SP,
-                                            callee: Callee::Expr(Box::new(Expr::Arrow(
-                                                ArrowExpr {
-                                                    span: DUMMY_SP,
-                                                    params: vec![],
-                                                    body: Box::new(BlockStmtOrExpr::Expr(
-                                                        expr.args[0].expr.clone(),
-                                                    )),
-                                                    is_async: false,
-                                                    is_generator: false,
-                                                    return_type: None,
-                                                    type_params: None,
-                                                },
-                                            ))),
-                                            args: vec![],
-                                            type_args: None,
-                                        })),
-                                        Box::new(Expr::Lit(Lit::Null(Null { span: DUMMY_SP }))),
+                                            expr: expr.args[0].expr.clone(),
+                                        }),
+                                        // return null
+                                        Stmt::Return(ReturnStmt {
+                                            span: DUMMY_SP,
+                                            arg: Some(Box::new(noop_react_component)),
+                                        }),
                                     ],
                                 })),
-                            }))
-                            .as_arg();
+                                is_async: true,
+                                is_generator: false,
+                                type_params: None,
+                                return_type: None,
+                            });
+
+                            expr.args[0] = side_effect_free_loader_arg.as_arg();
                         } else {
                             expr.args[0] = Lit::Null(Null { span: DUMMY_SP }).as_arg();
                         }
