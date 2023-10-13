@@ -1,10 +1,10 @@
 /** @type {import('next').NextConfig} */
 module.exports = {
   productionBrowserSourceMaps: true,
+  logging: {
+    level: 'verbose',
+  },
   experimental: {
-    logging: {
-      level: 'verbose',
-    },
     serverActions: true,
   },
 }
