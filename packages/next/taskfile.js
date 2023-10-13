@@ -2436,7 +2436,7 @@ export async function lib_esm(task, opts) {
 export async function server(task, opts) {
   await task
     .source('src/server/**/!(*.test).+(js|ts|tsx)')
-    .swc('server', { dev: opts.dev })
+    .swc('server', { dev: opts.dev, interopClientDefaultExport: true })
     .target('dist/server')
 
   await fs.copyFile(
