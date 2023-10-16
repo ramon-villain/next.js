@@ -21,6 +21,7 @@ createNextDescribe(
     dependencies: {
       'styled-components': 'latest',
       'server-only': 'latest',
+      'next-usequerystate': 'latest',
     },
     resolutions: {
       '@babel/core': '7.22.18',
