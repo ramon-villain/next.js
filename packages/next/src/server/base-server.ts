@@ -124,6 +124,7 @@ import {
 import { matchNextDataPathname } from './lib/match-next-data-pathname'
 import getRouteFromAssetPath from '../shared/lib/router/utils/get-route-from-asset-path'
 import { stripInternalHeaders } from './internal-utils'
+import { RSCPathnameNormalizer } from './future/normalizers/request/rsc'
 
 export type FindComponentsResult = {
   components: LoadComponentsReturnType
@@ -386,6 +387,10 @@ export default abstract class Server<ServerOptions extends Options = Options> {
   protected readonly i18nProvider?: I18NProvider
   protected readonly localeNormalizer?: LocaleRouteNormalizer
 
+  protected readonly normalizers: {
+    readonly rsc: RSCPathnameNormalizer
+  }
+
   public constructor(options: ServerOptions) {
     const {
       dir = '.',
@@ -448,6 +453,11 @@ export default abstract class Server<ServerOptions extends Options = Options> {
       minimalMode || !!process.env.NEXT_PRIVATE_MINIMAL_MODE
 
     this.hasAppDir = this.getHasAppDir(dev)
+
+    this.normalizers = {
+      rsc: new RSCPathnameNormalizer(this.hasAppDir),
+    }
+
     const serverComponents = this.hasAppDir
 
     this.nextFontManifest = this.getNextFontManifest()
@@ -799,7 +809,15 @@ export default abstract class Server<ServerOptions extends Options = Options> {
 
       // Parse url if parsedUrl not provided
       if (!parsedUrl || typeof parsedUrl !== 'object') {
+        if (!req.url) {
+          throw new Error('Invariant: url can not be undefined')
+        }
+
         parsedUrl = parseUrl(req.url!, true)
+      }
+
+      if (!parsedUrl.pathname) {
+        throw new Error("Invariant: pathname can't be empty")
       }
 
       // Parse the querystring ourselves if the user doesn't handle querystring parsing
@@ -810,21 +828,19 @@ export default abstract class Server<ServerOptions extends Options = Options> {
       }
       // in minimal mode we detect RSC revalidate if the .rsc
       // path is requested
-      if (this.minimalMode) {
-        if (req.url.endsWith('.rsc')) {
+      if (this.minimalMode && this.hasAppDir) {
+        // Normalize any RSC paths to the .rsc extension
+        let normalized = normalizeRscPath(req.url)
+        if (normalized !== req.url) {
           parsedUrl.query.__nextDataReq = '1'
+          req.url = normalized
+          parsedUrl.pathname = normalizeRscPath(parsedUrl.pathname)
         } else if (req.headers['x-now-route-matches']) {
           for (const param of FLIGHT_PARAMETERS) {
             delete req.headers[param.toString().toLowerCase()]
           }
         }
       }
-
-      req.url = normalizeRscPath(req.url, this.hasAppDir)
-      parsedUrl.pathname = normalizeRscPath(
-        parsedUrl.pathname || '',
-        this.hasAppDir
-      )
 
       this.attachRequestMeta(req, parsedUrl)
 
@@ -865,11 +881,14 @@ export default abstract class Server<ServerOptions extends Options = Options> {
           }
           // x-matched-path is the source of truth, it tells what page
           // should be rendered because we don't process rewrites in minimalMode
-          let matchedPath = normalizeRscPath(
-            new URL(req.headers['x-matched-path'] as string, 'http://localhost')
-              .pathname,
-            this.hasAppDir
+          let { pathname: matchedPath } = new URL(
+            req.headers['x-matched-path'] as string,
+            'http://localhost'
           )
+
+          if (this.normalizers.rsc.match(matchedPath)) {
+            matchedPath = this.normalizers.rsc.normalize(matchedPath, true)
+          }
 
           let urlPathname = new URL(req.url, 'http://localhost').pathname
 

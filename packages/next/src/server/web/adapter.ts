@@ -72,7 +72,7 @@ export async function adapter(
       ? JSON.parse(self.__PRERENDER_MANIFEST)
       : undefined
 
-  params.request.url = normalizeRscPath(params.request.url, true)
+  params.request.url = normalizeRscPath(params.request.url)
 
   const requestUrl = new NextURL(params.request.url, {
     headers: params.request.headers,

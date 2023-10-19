@@ -337,12 +337,12 @@ export function getUtils({
       let value: string | string[] | undefined = params[key]
 
       if (typeof value === 'string') {
-        value = normalizeRscPath(value, true)
+        value = normalizeRscPath(value)
       }
       if (Array.isArray(value)) {
         value = value.map((val) => {
           if (typeof val === 'string') {
-            val = normalizeRscPath(val, true)
+            val = normalizeRscPath(val)
           }
           return val
         })
